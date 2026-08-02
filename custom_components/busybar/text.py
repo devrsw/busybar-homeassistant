@@ -14,6 +14,7 @@ from .const import DOMAIN
 from .coordinator import BusyBarDataUpdateCoordinator
 
 NAME_PATTERN = re.compile(r'^[a-zA-Z0-9 !()_=+;:,.?\'"|@#$%^&*\[\]{}/\\<>-]+$')
+THEME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,40}$")
 
 
 async def async_setup_entry(
@@ -23,7 +24,12 @@ async def async_setup_entry(
 ) -> None:
     runtime_data = hass.data[DOMAIN][entry.entry_id]
     coordinator: BusyBarDataUpdateCoordinator = runtime_data.coordinator
-    async_add_entities([BusyBarNameText(entry, coordinator)])
+    async_add_entities(
+        [
+            BusyBarNameText(entry, coordinator),
+            BusyBarThemeText(entry, coordinator),
+        ]
+    )
 
 
 class BusyBarNameText(CoordinatorEntity[BusyBarDataUpdateCoordinator], TextEntity):
@@ -53,6 +59,51 @@ class BusyBarNameText(CoordinatorEntity[BusyBarDataUpdateCoordinator], TextEntit
                 "Device name contains unsupported characters"
             )
         await self.coordinator.client.async_set_name(value)
+        await self.coordinator.async_request_refresh()
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        device = self.coordinator.data.get("device", {})
+        firmware = self.coordinator.data.get("firmware", {})
+        serial_number = device.get("serial_number", self._entry.entry_id)
+        return DeviceInfo(
+            identifiers={(DOMAIN, serial_number)},
+            manufacturer="BUSY",
+            model=device.get("otp_model", "BUSY Bar"),
+            name=self.coordinator.data.get("name", {}).get("name") or self._entry.title,
+            serial_number=serial_number,
+            sw_version=firmware.get("version"),
+        )
+
+
+class BusyBarThemeText(CoordinatorEntity[BusyBarDataUpdateCoordinator], TextEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Busy Theme"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:palette-outline"
+    _attr_native_min = 1
+    _attr_native_max = 40
+    _attr_pattern = THEME_PATTERN.pattern
+
+    def __init__(self, entry: ConfigEntry, coordinator: BusyBarDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        serial_number = coordinator.data.get("device", {}).get("serial_number", entry.entry_id)
+        self._attr_unique_id = f"{serial_number}_busy_theme"
+
+    @property
+    def native_value(self) -> str:
+        return (
+            self.coordinator.data.get("busy", {})
+            .get("snapshot", {})
+            .get("busy_bar_settings", {})
+            .get("theme", "")
+        )
+
+    async def async_set_value(self, value: str) -> None:
+        if not THEME_PATTERN.fullmatch(value):
+            raise ValueError("Busy theme must contain only letters, numbers, _, -, or .")
+        await self.coordinator.client.async_set_busy_theme(value)
         await self.coordinator.async_request_refresh()
 
     @property

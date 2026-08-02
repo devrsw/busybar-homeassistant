@@ -80,6 +80,34 @@ draw_text:
       selector:
         boolean:
 
+send_input_command:
+  name: Send input command
+  description: Send a BUSY Bar input key command to control timer and UI actions.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    key:
+      name: Key
+      description: BUSY input key to send.
+      required: true
+      example: start
+      selector:
+        select:
+          options:
+            - up
+            - down
+            - ok
+            - back
+            - start
+            - busy
+            - custom
+            - off
+            - apps
+            - settings
+
 draw_dashboard:
   name: Draw dashboard
   description: Send a full BUSY Bar display payload so Home Assistant can render a custom dashboard.
@@ -138,6 +166,456 @@ draw_dashboard:
       selector:
         boolean:
 
+draw_entity_dashboard:
+  name: Draw entity dashboard
+  description: Build a simple BUSY Bar dashboard from current Home Assistant entity values.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      description: App namespace used by the BUSY Bar API.
+      default: home_assistant
+      selector:
+        text:
+    title:
+      name: Title
+      description: ASCII title shown at the top of the generated dashboard.
+      required: true
+      example: HOME
+      selector:
+        text:
+    entities:
+      name: Entities
+      description: List of Home Assistant entities to show. Each item supports entity_id, optional label, and optional attribute.
+      required: true
+      example:
+        - entity_id: sensor.living_room_temperature
+          label: TEMP
+        - entity_id: weather.home
+        - entity_id: sensor.washer_state
+          label: WASHER
+        - entity_id: sensor.phone_battery
+          label: PHONE
+      selector:
+        object:
+    display:
+      name: Display
+      description: Back display shows up to 4 rows. Front display shows a compact 2-row layout.
+      default: back
+      selector:
+        select:
+          options:
+            - front
+            - back
+    color:
+      name: Row color
+      description: RGBA hex color used for entity rows.
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    title_color:
+      name: Title color
+      description: RGBA hex color used for the dashboard title.
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      description: Optional blinking LED color in #RRGGBBAA format.
+      selector:
+        text:
+    priority:
+      name: Priority
+      description: Draw priority from 1 to 100.
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      description: Time in seconds to display the generated dashboard. Use 0 for no timeout.
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      description: Remove existing display elements for the same application before drawing the generated dashboard.
+      default: true
+      selector:
+        boolean:
+
+enable_live_entity_dashboard:
+  name: Enable live entity dashboard
+  description: Keep an entity-based dashboard live by redrawing it automatically when the selected Home Assistant entities change.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      default: home_assistant
+      selector:
+        text:
+    title:
+      name: Title
+      required: true
+      example: HOME
+      selector:
+        text:
+    entities:
+      name: Entities
+      description: List of entities that should trigger redraws and appear in the generated dashboard.
+      required: true
+      selector:
+        object:
+    display:
+      name: Display
+      default: back
+      selector:
+        select:
+          options:
+            - front
+            - back
+    color:
+      name: Row color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    title_color:
+      name: Title color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      selector:
+        text:
+    priority:
+      name: Priority
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      description: Optional timeout for each redraw.
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      default: true
+      selector:
+        boolean:
+
+disable_live_dashboard:
+  name: Disable live dashboard
+  description: Stop automatic redraws for the currently active live dashboard.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+
+draw_weather_dashboard:
+  name: Draw weather dashboard
+  description: Build a weather-focused BUSY Bar layout from a Home Assistant weather entity.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      default: home_assistant
+      selector:
+        text:
+    weather_entity_id:
+      name: Weather entity
+      description: Home Assistant weather entity to read condition, temperature, and humidity from.
+      required: true
+      example: weather.home
+      selector:
+        entity:
+          domain: weather
+    title:
+      name: Title
+      default: WEATHER
+      selector:
+        text:
+    display:
+      name: Display
+      default: back
+      selector:
+        select:
+          options:
+            - front
+            - back
+    color:
+      name: Text color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    title_color:
+      name: Title color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    accent_color:
+      name: Accent color
+      default: "#00FFCCFF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      selector:
+        text:
+    priority:
+      name: Priority
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      default: true
+      selector:
+        boolean:
+
+draw_room_climate_dashboard:
+  name: Draw room climate dashboard
+  description: Build a room climate layout from Home Assistant temperature and humidity entities.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      default: home_assistant
+      selector:
+        text:
+    temperature_entity_id:
+      name: Temperature entity
+      description: Home Assistant entity that provides the room temperature.
+      required: true
+      example: sensor.living_room_temperature
+      selector:
+        entity:
+    humidity_entity_id:
+      name: Humidity entity
+      description: Optional Home Assistant humidity entity.
+      example: sensor.living_room_humidity
+      selector:
+        entity:
+    title:
+      name: Title
+      default: CLIMATE
+      selector:
+        text:
+    display:
+      name: Display
+      default: back
+      selector:
+        select:
+          options:
+            - front
+            - back
+    color:
+      name: Text color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    title_color:
+      name: Title color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    accent_color:
+      name: Accent color
+      default: "#00FFCCFF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      selector:
+        text:
+    priority:
+      name: Priority
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      default: true
+      selector:
+        boolean:
+
+draw_progress_card:
+  name: Draw progress card
+  description: Build a progress-card layout from a Home Assistant percentage entity.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      default: home_assistant
+      selector:
+        text:
+    entity_id:
+      name: Percent entity
+      description: Home Assistant entity whose state is a numeric percentage.
+      required: true
+      example: sensor.phone_battery
+      selector:
+        entity:
+    label:
+      name: Label
+      description: Optional override for the card label.
+      selector:
+        text:
+    display:
+      name: Display
+      default: front
+      selector:
+        select:
+          options:
+            - front
+            - back
+    title_color:
+      name: Label color
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    accent_color:
+      name: Fill color
+      default: "#00FF00FF"
+      selector:
+        text:
+    track_color:
+      name: Track color
+      default: "#333333FF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      selector:
+        text:
+    priority:
+      name: Priority
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      default: true
+      selector:
+        boolean:
+
+bind_button_action:
+  name: Bind button action
+  description: Bind a BUSY Bar hardware button event to a Home Assistant service call for the current runtime.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    button:
+      name: Button
+      description: BUSY Bar button name from the websocket event, for example START.
+      required: true
+      example: START
+      selector:
+        text:
+    action:
+      name: Action
+      description: Button action type, usually PRESS.
+      default: PRESS
+      selector:
+        text:
+    service:
+      name: Service
+      description: Home Assistant service in domain.service format.
+      required: true
+      example: light.toggle
+      selector:
+        text:
+    service_data:
+      name: Service data
+      description: Optional service data passed to the Home Assistant service.
+      selector:
+        object:
+
+clear_button_actions:
+  name: Clear button actions
+  description: Remove runtime button-action bindings for a BUSY Bar entry.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    button:
+      name: Button
+      description: Optional button name filter.
+      selector:
+        text:
+    action:
+      name: Action
+      description: Optional action filter.
+      selector:
+        text:
+
 clear_display:
   name: Clear display
   description: Clear BUSY Bar display elements.
@@ -175,7 +653,7 @@ set_brightness:
 
 set_volume:
   name: Set volume
-  description: Set BUSY Bar audio volume.
+  description: Set BUSY Bar audio volume in 5% increments.
   fields:
     entry_id:
       name: Entry ID
@@ -184,13 +662,13 @@ set_volume:
         text:
     volume:
       name: Volume
-      description: Value from 0 to 100.
+      description: Value from 0 to 100 in steps of 5.
       required: true
       selector:
         number:
           min: 0
           max: 100
-          step: 1
+          step: 5
           mode: slider
     silent:
       name: Silent

@@ -97,7 +97,7 @@ class BusyBarVolumeNumber(CoordinatorEntity[BusyBarDataUpdateCoordinator], Numbe
     _attr_icon = "mdi:volume-high"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
-    _attr_native_step = 1
+    _attr_native_step = 5
     _attr_mode = "slider"
 
     def __init__(self, entry: ConfigEntry, coordinator: BusyBarDataUpdateCoordinator) -> None:
@@ -112,7 +112,9 @@ class BusyBarVolumeNumber(CoordinatorEntity[BusyBarDataUpdateCoordinator], Numbe
         return None if value is None else float(value)
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.client.async_set_volume(int(round(value)), True)
+        stepped = int(round(value / 5.0) * 5)
+        stepped = max(0, min(100, stepped))
+        await self.coordinator.client.async_set_volume(stepped, True)
         await self.coordinator.async_request_refresh()
 
     @property

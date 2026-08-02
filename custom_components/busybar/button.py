@@ -30,6 +30,14 @@ async def _async_stop_audio(coordinator: BusyBarDataUpdateCoordinator) -> None:
     await coordinator.async_request_refresh()
 
 
+def _make_input_press(key: str):
+    async def _async_press(coordinator: BusyBarDataUpdateCoordinator) -> None:
+        await coordinator.client.async_send_input_key(key)
+        await coordinator.async_request_refresh()
+
+    return _async_press
+
+
 BUTTONS: tuple[BusyBarButtonDescription, ...] = (
     BusyBarButtonDescription(
         key="clear_display",
@@ -44,6 +52,76 @@ BUTTONS: tuple[BusyBarButtonDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         icon="mdi:stop-circle-outline",
         press_fn=_async_stop_audio,
+    ),
+    BusyBarButtonDescription(
+        key="input_up",
+        name="Input Up",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:arrow-up-circle-outline",
+        press_fn=_make_input_press("up"),
+    ),
+    BusyBarButtonDescription(
+        key="input_down",
+        name="Input Down",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:arrow-down-circle-outline",
+        press_fn=_make_input_press("down"),
+    ),
+    BusyBarButtonDescription(
+        key="input_start",
+        name="Input Start",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:play-pause",
+        press_fn=_make_input_press("start"),
+    ),
+    BusyBarButtonDescription(
+        key="input_busy",
+        name="Input Busy",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:briefcase-clock-outline",
+        press_fn=_make_input_press("busy"),
+    ),
+    BusyBarButtonDescription(
+        key="input_custom",
+        name="Input Custom",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:tune-variant",
+        press_fn=_make_input_press("custom"),
+    ),
+    BusyBarButtonDescription(
+        key="input_ok",
+        name="Input OK",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:check-circle-outline",
+        press_fn=_make_input_press("ok"),
+    ),
+    BusyBarButtonDescription(
+        key="input_back",
+        name="Input Back",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:arrow-left-circle-outline",
+        press_fn=_make_input_press("back"),
+    ),
+    BusyBarButtonDescription(
+        key="input_apps",
+        name="Input Apps",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:apps",
+        press_fn=_make_input_press("apps"),
+    ),
+    BusyBarButtonDescription(
+        key="input_settings",
+        name="Input Settings",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:cog-outline",
+        press_fn=_make_input_press("settings"),
+    ),
+    BusyBarButtonDescription(
+        key="input_off",
+        name="Input Off",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:power",
+        press_fn=_make_input_press("off"),
     ),
 )
 

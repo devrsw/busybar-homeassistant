@@ -13,6 +13,12 @@ Local-first integration for Home Assistant. USB and LAN control work without any
 - Additional Home Assistant entities for BUSY Bar battery, power, firmware, security, auto-update status, audio volume, device naming, and device controls
 - Services for drawing text, clearing the display, setting display brightness, and setting audio volume
 - A generic dashboard service that lets Home Assistant send a full BUSY Bar display layout
+- A higher-level dashboard service that renders Home Assistant entity states without raw BUSY Bar payload JSON
+- Specialized helpers for weather, room climate, and percent/progress layouts
+- A live entity-dashboard mode that redraws automatically when Home Assistant entities change
+- BUSY Bar button events exposed into Home Assistant, with optional runtime service bindings
+- BUSY timer entities for mode, pause state, time left, current interval, and editable theme
+- BUSY input command controls through buttons and a dedicated service
 - Support for BUSY Bar over USB, LAN, or the BUSY cloud endpoint
 
 ## Installation
@@ -128,13 +134,155 @@ data:
 					- "#00FF00FF"
 ```
 
+### `busybar.draw_entity_dashboard`
+
+Build a simple dashboard directly from Home Assistant entity values. The integration reads the entities, formats label/value rows, and generates the BUSY Bar payload for you.
+
+Example:
+
+```yaml
+service: busybar.draw_entity_dashboard
+data:
+	title: HOME
+	display: back
+	clear_before_draw: true
+	entities:
+		- entity_id: sensor.living_room_temperature
+			label: TEMP
+		- entity_id: sensor.office_humidity
+			label: HUMID
+		- entity_id: weather.home
+			label: WEATHER
+		- entity_id: sensor.washer_state
+			label: WASHER
+```
+
+Each entity item supports:
+
+- `entity_id` required
+- `label` optional override for the row label
+- `attribute` optional attribute name to display instead of the state
+
+### `busybar.draw_weather_dashboard`
+
+Build a weather layout from a Home Assistant `weather.*` entity.
+
+```yaml
+service: busybar.draw_weather_dashboard
+data:
+	weather_entity_id: weather.home
+	title: WEATHER
+	display: back
+```
+
+### `busybar.draw_room_climate_dashboard`
+
+Build a room climate layout from temperature and optional humidity entities.
+
+```yaml
+service: busybar.draw_room_climate_dashboard
+data:
+	title: OFFICE
+	temperature_entity_id: sensor.office_temperature
+	humidity_entity_id: sensor.office_humidity
+	display: back
+```
+
+### `busybar.draw_progress_card`
+
+Build a progress card from any Home Assistant entity whose state is a numeric percentage.
+
+```yaml
+service: busybar.draw_progress_card
+data:
+	entity_id: sensor.phone_battery
+	label: PHONE
+	display: front
+```
+
+### `busybar.enable_live_entity_dashboard`
+
+Keep an entity-based dashboard live. The integration subscribes to the listed Home Assistant entities and redraws the BUSY Bar whenever one of them changes.
+
+```yaml
+service: busybar.enable_live_entity_dashboard
+data:
+	title: HOME
+	display: back
+	entities:
+		- entity_id: sensor.living_room_temperature
+			label: TEMP
+		- entity_id: sensor.office_humidity
+			label: HUMID
+		- entity_id: weather.home
+			label: WEATHER
+```
+
+Disable it with:
+
+```yaml
+service: busybar.disable_live_dashboard
+```
+
+### BUSY Bar button events
+
+The integration listens to the BUSY Bar websocket stream and fires a Home Assistant event named `busybar_button` whenever the device reports a button event.
+
+Event data includes:
+
+- `entry_id`
+- `name`
+- `button`
+- `action`
+
+You can use normal Home Assistant automations to react to those events, or register runtime button bindings with the helper services below.
+
+### `busybar.bind_button_action`
+
+Bind a BUSY Bar button event to a Home Assistant service call for the current runtime.
+
+```yaml
+service: busybar.bind_button_action
+data:
+	button: START
+	action: PRESS
+	service: light.toggle
+	service_data:
+		entity_id: light.office_lamp
+```
+
+Remove bindings with:
+
+```yaml
+service: busybar.clear_button_actions
+data:
+	button: START
+```
+
 ### `busybar.set_brightness`
 
 Set display brightness to `auto` or a numeric value from `0` to `100`.
 
 ### `busybar.set_volume`
 
-Set device audio volume from `0` to `100`.
+Set device audio volume from `0` to `100` in `5%` increments.
+
+```yaml
+service: busybar.set_volume
+data:
+	volume: 55
+	silent: true
+```
+
+### `busybar.send_input_command`
+
+Send a BUSY input key command (`up`, `down`, `ok`, `back`, `start`, `busy`, `custom`, `off`, `apps`, or `settings`).
+
+```yaml
+service: busybar.send_input_command
+data:
+	key: start
+```
 
 ## Exposed entities
 
@@ -149,12 +297,19 @@ The integration now exposes a wider set of Home Assistant entities backed by the
 - Auto-update enabled
 - Audio volume as a writable number entity
 - Device name as a writable text entity
+- Busy theme as a writable text entity
+- Busy timer mode and current interval sensors
+- Busy time-left duration sensor and paused-state binary sensor
 - Buttons to clear the Home Assistant display namespace and stop audio playback
+- Buttons for common BUSY input commands (Start, Busy, Custom, OK, Back)
 
 ## Notes
 
 - The text draw service intentionally starts with text-only rendering because that is the smallest stable control surface for Home Assistant automations.
 - The dashboard service is a direct pass-through for BUSY Bar display payloads, so you can build richer layouts in Home Assistant without waiting on dedicated entity types.
+- The entity dashboard helper is intentionally simple and text-based. It is meant to cover common status dashboards without forcing you to hand-author BUSY Bar element JSON.
+- The specialized helpers are thin layout builders on top of the BUSY Bar draw API. They are meant to cover common automation use cases with less templating.
+- Runtime button bindings are not persisted across Home Assistant restarts. Use the `busybar_button` event in automations if you need persistent behavior.
 - BUSY Bar text rendering accepts printable ASCII only.
 - If you configure more than one BUSY Bar, include `entry_id` in service calls to target a specific device.
 

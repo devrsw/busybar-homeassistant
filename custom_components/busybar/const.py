@@ -18,11 +18,35 @@ ATTR_DURATION = "duration"
 ATTR_LED_NOTIFICATION_COLOR = "led_notification_color"
 ATTR_PAYLOAD = "payload"
 
+EVENT_BUTTON = "busybar_button"
+
+SERVICE_BIND_BUTTON_ACTION = "bind_button_action"
+SERVICE_CLEAR_BUTTON_ACTIONS = "clear_button_actions"
 SERVICE_CLEAR_DISPLAY = "clear_display"
 SERVICE_DRAW_DASHBOARD = "draw_dashboard"
+SERVICE_DRAW_ENTITY_DASHBOARD = "draw_entity_dashboard"
+SERVICE_DRAW_PROGRESS_CARD = "draw_progress_card"
+SERVICE_ENABLE_LIVE_ENTITY_DASHBOARD = "enable_live_entity_dashboard"
 SERVICE_DRAW_TEXT = "draw_text"
+SERVICE_DRAW_WEATHER_DASHBOARD = "draw_weather_dashboard"
+SERVICE_DRAW_ROOM_CLIMATE_DASHBOARD = "draw_room_climate_dashboard"
+SERVICE_SEND_INPUT_COMMAND = "send_input_command"
 SERVICE_SET_BRIGHTNESS = "set_brightness"
 SERVICE_SET_VOLUME = "set_volume"
+SERVICE_DISABLE_LIVE_DASHBOARD = "disable_live_dashboard"
+
+INPUT_KEYS = (
+    "up",
+    "down",
+    "ok",
+    "back",
+    "start",
+    "busy",
+    "custom",
+    "off",
+    "apps",
+    "settings",
+)
 
 DISPLAY_FRONT = "front"
 DISPLAY_BACK = "back"

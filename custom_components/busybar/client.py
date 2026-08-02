@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import asyncio
+import json
 import logging
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
@@ -62,6 +63,11 @@ class BusyBarApiClient:
         if not path.startswith("/"):
             path = f"/{path}"
         return f"{self._base_url}{path}"
+
+    def _build_ws_url(self, path: str) -> str:
+        parsed = urlparse(self._build_url(path))
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        return urlunparse(parsed._replace(scheme=scheme))
 
     def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {"Accept": "application/json"}
@@ -126,6 +132,28 @@ class BusyBarApiClient:
     async def async_set_name(self, name: str) -> dict[str, Any]:
         return await self._request("POST", "/name", json_payload={"name": name})
 
+    async def async_get_busy_snapshot(self) -> dict[str, Any]:
+        return await self._request("GET", "/busy/snapshot")
+
+    async def async_set_busy_snapshot(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        return await self._request("PUT", "/busy/snapshot", json_payload=snapshot)
+
+    async def async_set_busy_theme(self, theme: str) -> dict[str, Any]:
+        current = await self.async_get_busy_snapshot()
+        snapshot = current.get("snapshot")
+        if not isinstance(snapshot, dict):
+            raise BusyBarApiError("BUSY snapshot payload is missing snapshot object")
+
+        busy_settings = snapshot.get("busy_bar_settings")
+        if not isinstance(busy_settings, dict):
+            raise BusyBarApiError("BUSY snapshot payload is missing busy_bar_settings")
+
+        busy_settings["theme"] = theme
+        return await self.async_set_busy_snapshot(current)
+
+    async def async_send_input_key(self, key: str) -> dict[str, Any]:
+        return await self._request("POST", "/input", params={"key": key})
+
     async def async_get_snapshot(self) -> dict[str, Any]:
         status, brightness, audio, name = await asyncio.gather(
             self.async_get_status(),
@@ -133,11 +161,18 @@ class BusyBarApiClient:
             self.async_get_audio_volume(),
             self.async_get_name(),
         )
+
+        try:
+            busy = await self.async_get_busy_snapshot()
+        except BusyBarApiError:
+            busy = {}
+
         return {
             **status,
             "display": {"brightness": brightness.get("value")},
             "audio": {"volume": audio.get("volume")},
             "name": {"name": name.get("name")},
+            "busy": busy if isinstance(busy, dict) else {},
         }
 
     async def async_draw(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -163,3 +198,20 @@ class BusyBarApiClient:
 
     async def async_stop_audio(self) -> dict[str, Any]:
         return await self._request("DELETE", "/audio/play")
+
+    async def async_status_ws_messages(self):
+        ws_url = self._build_ws_url("/status/ws")
+        async with self._session.ws_connect(
+            ws_url,
+            headers=self._headers(),
+            heartbeat=30,
+        ) as websocket:
+            await websocket.send_json({"enable": True})
+            async for message in websocket:
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    try:
+                        yield json.loads(message.data)
+                    except json.JSONDecodeError:
+                        LOGGER.debug("Ignoring non-JSON BUSY Bar websocket message: %s", message.data)
+                elif message.type == aiohttp.WSMsgType.ERROR:
+                    raise BusyBarApiError("BUSY Bar websocket stream error")

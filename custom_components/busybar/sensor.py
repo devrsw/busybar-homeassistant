@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, PERCENTAGE
+from homeassistant.const import EntityCategory, PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -30,6 +30,24 @@ def _timestamp_from_epoch(value: Any) -> datetime | None:
         return dt_util.utc_from_timestamp(int(value))
     except (TypeError, ValueError):
         return None
+
+
+def _busy_snapshot(data: dict[str, Any]) -> dict[str, Any]:
+    return data.get("busy", {}).get("snapshot", {})
+
+
+def _busy_time_left_seconds(data: dict[str, Any]) -> int | None:
+    snapshot = _busy_snapshot(data)
+    snapshot_type = snapshot.get("type")
+    if snapshot_type == "SIMPLE":
+        value = snapshot.get("time_left_ms")
+    elif snapshot_type == "INTERVAL":
+        value = snapshot.get("current_interval_time_left_ms")
+    else:
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    return max(0, int(round(value / 1000)))
 
 
 SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
@@ -141,6 +159,27 @@ SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:target",
         value_fn=lambda data: data.get("firmware", {}).get("target"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="busy_timer_mode",
+        name="Busy Timer Mode",
+        icon="mdi:timer-cog-outline",
+        value_fn=lambda data: _busy_snapshot(data).get("type"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="busy_time_left",
+        name="Busy Time Left",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        suggested_display_precision=0,
+        icon="mdi:timer-sand",
+        value_fn=_busy_time_left_seconds,
+    ),
+    BusyBarSensorEntityDescription(
+        key="busy_current_interval",
+        name="Busy Current Interval",
+        icon="mdi:counter",
+        value_fn=lambda data: _busy_snapshot(data).get("current_interval"),
     ),
 )
 

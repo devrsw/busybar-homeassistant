@@ -31,6 +31,12 @@ BINARY_SENSORS: tuple[BusyBarBinarySensorDescription, ...] = (
         icon="mdi:update-auto",
         value_fn=lambda data: data.get("system", {}).get("auto_update_enabled"),
     ),
+    BusyBarBinarySensorDescription(
+        key="busy_timer_paused",
+        name="Busy Timer Paused",
+        icon="mdi:pause-circle-outline",
+        value_fn=lambda data: data.get("busy", {}).get("snapshot", {}).get("is_paused"),
+    ),
 )
 
 

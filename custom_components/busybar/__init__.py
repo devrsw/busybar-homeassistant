@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_TOKEN
+from homeassistant.helpers.typing import StateType
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -26,24 +28,38 @@ from .const import (
     DATA_SERVICES_REGISTERED,
     DEFAULT_APPLICATION_NAME,
     DEFAULT_DRAW_PRIORITY,
+    DISPLAY_BACK,
     DISPLAY_ALIGNMENTS,
     DISPLAY_FONTS,
     DISPLAY_FRONT,
     DISPLAY_NAMES,
     DOMAIN,
+    EVENT_BUTTON,
+    INPUT_KEYS,
     MAX_BRIGHTNESS,
     MAX_VOLUME,
+    SERVICE_BIND_BUTTON_ACTION,
+    SERVICE_CLEAR_BUTTON_ACTIONS,
     SERVICE_CLEAR_DISPLAY,
+    SERVICE_DISABLE_LIVE_DASHBOARD,
     SERVICE_DRAW_DASHBOARD,
+    SERVICE_DRAW_ENTITY_DASHBOARD,
+    SERVICE_DRAW_PROGRESS_CARD,
+    SERVICE_ENABLE_LIVE_ENTITY_DASHBOARD,
     SERVICE_DRAW_TEXT,
+    SERVICE_DRAW_ROOM_CLIMATE_DASHBOARD,
+    SERVICE_DRAW_WEATHER_DASHBOARD,
+    SERVICE_SEND_INPUT_COMMAND,
     SERVICE_SET_BRIGHTNESS,
     SERVICE_SET_VOLUME,
 )
 from .coordinator import BusyBarDataUpdateCoordinator
+from .runtime import ButtonActionRegistry, ButtonEventListener, LiveDashboardController
 
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor", "text"]
 COLOR_HEX_PATTERN = vol.Match(r"^#[A-Fa-f0-9]{8}$")
+WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
 @dataclass
@@ -52,6 +68,9 @@ class BusyBarRuntimeData:
 
     client: BusyBarApiClient
     coordinator: BusyBarDataUpdateCoordinator
+    live_dashboard: LiveDashboardController
+    button_actions: ButtonActionRegistry
+    button_listener: ButtonEventListener
 
 
 def _validate_ascii_text(value: str) -> str:
@@ -60,6 +79,521 @@ def _validate_ascii_text(value: str) -> str:
     if any(ord(char) < 32 or ord(char) > 126 for char in value):
         raise vol.Invalid("BUSY Bar text must contain printable ASCII characters only")
     return value
+
+
+def _validate_step_5(value: int) -> int:
+    if value % 5 != 0:
+        raise vol.Invalid("Value must be in 5% increments")
+    return value
+
+
+def _coerce_ascii_text(value: Any, default: str = "") -> str:
+    text = str(value or default)
+    text = text.encode("ascii", "ignore").decode().strip()
+    text = WHITESPACE_PATTERN.sub(" ", text)
+    return text
+
+
+def _get_state(hass: HomeAssistant, entity_id: str):
+    state = hass.states.get(entity_id)
+    if state is None:
+        raise ServiceValidationError(f"Unknown entity_id: {entity_id}")
+    return state
+
+
+def _format_state_value(value: StateType, unit: str | None = None) -> str:
+    text = _coerce_ascii_text(value)
+    if unit and text not in {"", "unknown", "unavailable", "none"}:
+        return _validate_ascii_text(f"{text} {unit}")
+    return _validate_ascii_text(text or "unknown")
+
+
+def _format_entity_line(hass: HomeAssistant, item: dict[str, Any]) -> str:
+    state = _get_state(hass, item["entity_id"])
+
+    if item.get("attribute"):
+        raw_value = state.attributes.get(item["attribute"])
+        if raw_value is None:
+            raise ServiceValidationError(
+                f"Entity {item['entity_id']} has no attribute {item['attribute']}"
+            )
+        value_text = _coerce_ascii_text(raw_value)
+    else:
+        value_text = _coerce_ascii_text(state.state)
+        unit = _coerce_ascii_text(state.attributes.get("unit_of_measurement"))
+        if unit and value_text not in {"unknown", "unavailable"}:
+            value_text = f"{value_text} {unit}"
+
+    label = item.get("label") or state.name or item["entity_id"].split(".", 1)[-1]
+    label_text = _coerce_ascii_text(label).upper()
+    line = f"{label_text}: {value_text}" if value_text else label_text
+    return _validate_ascii_text(line[:72])
+
+
+def _base_payload(call_data: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        ATTR_APPLICATION_NAME: call_data[ATTR_APPLICATION_NAME],
+        "priority": call_data["priority"],
+        "elements": [],
+    }
+    if ATTR_LED_NOTIFICATION_COLOR in call_data:
+        payload[ATTR_LED_NOTIFICATION_COLOR] = call_data[ATTR_LED_NOTIFICATION_COLOR]
+    return payload
+
+
+def _apply_timeout(call_data: dict[str, Any], element: dict[str, Any]) -> dict[str, Any]:
+    if ATTR_DURATION in call_data:
+        element["timeout"] = call_data[ATTR_DURATION]
+    return element
+
+
+def _build_entity_dashboard_payload(
+    hass: HomeAssistant,
+    call_data: dict[str, Any],
+) -> dict[str, Any]:
+    display = call_data["display"]
+    title = _validate_ascii_text(_coerce_ascii_text(call_data["title"]).upper())
+    entity_items = call_data["entities"]
+    lines = [_format_entity_line(hass, item) for item in entity_items]
+
+    payload: dict[str, Any] = {
+        **_base_payload(call_data),
+    }
+
+    if display == DISPLAY_BACK:
+        title_width = 152
+        payload["elements"].append(
+            {
+                "id": "title",
+                "type": "text",
+                "text": title,
+                "font": "bold",
+                "color": call_data["title_color"],
+                "display": DISPLAY_BACK,
+                "align": "top_left",
+                "x": 4,
+                "y": 4,
+                "width": title_width,
+            }
+        )
+        for index, line in enumerate(lines[:4]):
+            element = _apply_timeout(call_data, {
+                "id": f"line_{index}",
+                "type": "text",
+                "text": line,
+                "font": "normal",
+                "color": call_data["color"],
+                "display": DISPLAY_BACK,
+                "align": "top_left",
+                "x": 4,
+                "y": 22 + index * 14,
+                "width": 152,
+                "scroll_rate": 900,
+                "scroll_start_delay": 1000,
+                "scroll_repeat_delay": 1800,
+            })
+            payload["elements"].append(element)
+        return payload
+
+    payload["elements"].append(
+        {
+            "id": "title",
+            "type": "text",
+            "text": title[:14],
+            "font": "small",
+            "color": call_data["title_color"],
+            "display": DISPLAY_FRONT,
+            "align": "top_mid",
+            "x": 0,
+            "y": 0,
+            "width": 72,
+        }
+    )
+    for index, line in enumerate(lines[:2]):
+        element = _apply_timeout(call_data, {
+            "id": f"line_{index}",
+            "type": "text",
+            "text": line,
+            "font": "tiny",
+            "color": call_data["color"],
+            "display": DISPLAY_FRONT,
+            "align": "top_left",
+            "x": 0,
+            "y": 8 + index * 6,
+            "width": 72,
+            "scroll_rate": 1100,
+            "scroll_start_delay": 1000,
+            "scroll_repeat_delay": 1600,
+        })
+        payload["elements"].append(element)
+    return payload
+
+
+def _build_weather_dashboard_payload(hass: HomeAssistant, call_data: dict[str, Any]) -> dict[str, Any]:
+    display = call_data["display"]
+    state = _get_state(hass, call_data["weather_entity_id"])
+    condition = _validate_ascii_text(_coerce_ascii_text(state.state, "unknown").upper())
+    temperature = state.attributes.get("temperature")
+    temperature_unit = _coerce_ascii_text(state.attributes.get("temperature_unit"))
+    humidity = state.attributes.get("humidity")
+    if temperature is None:
+        raise ServiceValidationError(
+            f"Weather entity {call_data['weather_entity_id']} has no temperature attribute"
+        )
+
+    temp_text = _format_state_value(temperature, temperature_unit)
+    humid_text = _format_state_value(humidity, "%") if humidity is not None else ""
+    payload = _base_payload(call_data)
+
+    if display == DISPLAY_BACK:
+        payload["elements"].extend(
+            [
+                {
+                    "id": "title",
+                    "type": "text",
+                    "text": _validate_ascii_text(_coerce_ascii_text(call_data["title"]).upper()),
+                    "font": "bold",
+                    "color": call_data["title_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 4,
+                    "width": 152,
+                },
+                _apply_timeout(call_data, {
+                    "id": "condition",
+                    "type": "text",
+                    "text": f"NOW: {condition}"[:72],
+                    "font": "normal",
+                    "color": call_data["color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 24,
+                    "width": 152,
+                }),
+                _apply_timeout(call_data, {
+                    "id": "temp",
+                    "type": "text",
+                    "text": f"TEMP: {temp_text}"[:72],
+                    "font": "large",
+                    "color": call_data["accent_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 40,
+                    "width": 152,
+                }),
+            ]
+        )
+        if humid_text:
+            payload["elements"].append(
+                _apply_timeout(call_data, {
+                    "id": "humidity",
+                    "type": "text",
+                    "text": f"HUMID: {humid_text}"[:72],
+                    "font": "normal",
+                    "color": call_data["color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 62,
+                    "width": 152,
+                })
+            )
+        return payload
+
+    payload["elements"].extend(
+        [
+            {
+                "id": "title",
+                "type": "text",
+                "text": _validate_ascii_text(_coerce_ascii_text(call_data["title"]).upper())[:14],
+                "font": "small",
+                "color": call_data["title_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_mid",
+                "x": 0,
+                "y": 0,
+                "width": 72,
+            },
+            _apply_timeout(call_data, {
+                "id": "condition",
+                "type": "text",
+                "text": condition[:14],
+                "font": "tiny",
+                "color": call_data["color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_left",
+                "x": 0,
+                "y": 8,
+                "width": 72,
+            }),
+            _apply_timeout(call_data, {
+                "id": "temp",
+                "type": "text",
+                "text": temp_text[:14],
+                "font": "small",
+                "color": call_data["accent_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_left",
+                "x": 0,
+                "y": 16,
+                "width": 72,
+            }),
+        ]
+    )
+    return payload
+
+
+def _build_room_climate_dashboard_payload(
+    hass: HomeAssistant, call_data: dict[str, Any]
+) -> dict[str, Any]:
+    display = call_data["display"]
+    temp_state = _get_state(hass, call_data["temperature_entity_id"])
+    temperature = _format_state_value(
+        temp_state.state, _coerce_ascii_text(temp_state.attributes.get("unit_of_measurement"))
+    )
+    humidity = None
+    if call_data.get("humidity_entity_id"):
+        humidity_state = _get_state(hass, call_data["humidity_entity_id"])
+        humidity = _format_state_value(
+            humidity_state.state,
+            _coerce_ascii_text(humidity_state.attributes.get("unit_of_measurement")) or "%",
+        )
+    payload = _base_payload(call_data)
+    title = _validate_ascii_text(_coerce_ascii_text(call_data["title"]).upper())
+
+    if display == DISPLAY_BACK:
+        payload["elements"].extend(
+            [
+                {
+                    "id": "title",
+                    "type": "text",
+                    "text": title,
+                    "font": "bold",
+                    "color": call_data["title_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 4,
+                    "width": 152,
+                },
+                _apply_timeout(call_data, {
+                    "id": "temperature",
+                    "type": "text",
+                    "text": f"TEMP: {temperature}"[:72],
+                    "font": "large",
+                    "color": call_data["accent_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 26,
+                    "width": 152,
+                }),
+            ]
+        )
+        if humidity:
+            payload["elements"].append(
+                _apply_timeout(call_data, {
+                    "id": "humidity",
+                    "type": "text",
+                    "text": f"HUMID: {humidity}"[:72],
+                    "font": "normal",
+                    "color": call_data["color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 4,
+                    "y": 60,
+                    "width": 152,
+                })
+            )
+        return payload
+
+    payload["elements"].extend(
+        [
+            {
+                "id": "title",
+                "type": "text",
+                "text": title[:14],
+                "font": "small",
+                "color": call_data["title_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_mid",
+                "x": 0,
+                "y": 0,
+                "width": 72,
+            },
+            _apply_timeout(call_data, {
+                "id": "temperature",
+                "type": "text",
+                "text": temperature[:14],
+                "font": "small",
+                "color": call_data["accent_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_left",
+                "x": 0,
+                "y": 10,
+                "width": 72,
+            }),
+        ]
+    )
+    if humidity:
+        payload["elements"].append(
+            _apply_timeout(call_data, {
+                "id": "humidity",
+                "type": "text",
+                "text": humidity[:14],
+                "font": "tiny",
+                "color": call_data["color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_left",
+                "x": 0,
+                "y": 20,
+                "width": 72,
+            })
+        )
+    return payload
+
+
+def _build_progress_card_payload(hass: HomeAssistant, call_data: dict[str, Any]) -> dict[str, Any]:
+    display = call_data["display"]
+    state = _get_state(hass, call_data["entity_id"])
+    try:
+        percent = int(round(float(state.state)))
+    except (TypeError, ValueError):
+        raise ServiceValidationError(
+            f"Entity {call_data['entity_id']} state is not a numeric percentage"
+        )
+    percent = max(0, min(100, percent))
+    label = _validate_ascii_text(
+        _coerce_ascii_text(call_data.get("label") or state.name or "PROGRESS").upper()
+    )
+    value_text = _validate_ascii_text(f"{percent}%")
+    payload = _base_payload(call_data)
+
+    if display == DISPLAY_BACK:
+        bar_width = 144
+        fill_width = max(2, round(bar_width * percent / 100)) if percent > 0 else 0
+        payload["elements"].extend(
+            [
+                {
+                    "id": "label",
+                    "type": "text",
+                    "text": label[:18],
+                    "font": "bold",
+                    "color": call_data["title_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 8,
+                    "y": 8,
+                    "width": 144,
+                },
+                _apply_timeout(call_data, {
+                    "id": "value",
+                    "type": "text",
+                    "text": value_text,
+                    "font": "large",
+                    "color": call_data["accent_color"],
+                    "display": DISPLAY_BACK,
+                    "align": "top_left",
+                    "x": 8,
+                    "y": 30,
+                    "width": 80,
+                }),
+                _apply_timeout(call_data, {
+                    "id": "track",
+                    "type": "rectangle",
+                    "display": DISPLAY_BACK,
+                    "x": 8,
+                    "y": 62,
+                    "width": bar_width,
+                    "height": 12,
+                    "radius": 3,
+                    "fill": "solid",
+                    "fill_colors": [call_data["track_color"]],
+                    "border_width": 0,
+                }),
+            ]
+        )
+        if fill_width > 0:
+            payload["elements"].append(
+                _apply_timeout(call_data, {
+                    "id": "fill",
+                    "type": "rectangle",
+                    "display": DISPLAY_BACK,
+                    "x": 8,
+                    "y": 62,
+                    "width": fill_width,
+                    "height": 12,
+                    "radius": 3,
+                    "fill": "solid",
+                    "fill_colors": [call_data["accent_color"]],
+                    "border_width": 0,
+                })
+            )
+        return payload
+
+    bar_width = 68
+    fill_width = max(1, round(bar_width * percent / 100)) if percent > 0 else 0
+    payload["elements"].extend(
+        [
+            {
+                "id": "label",
+                "type": "text",
+                "text": label[:14],
+                "font": "small",
+                "color": call_data["title_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_mid",
+                "x": 0,
+                "y": 0,
+                "width": 72,
+            },
+            _apply_timeout(call_data, {
+                "id": "value",
+                "type": "text",
+                "text": value_text,
+                "font": "small",
+                "color": call_data["accent_color"],
+                "display": DISPLAY_FRONT,
+                "align": "top_mid",
+                "x": 0,
+                "y": 10,
+                "width": 72,
+            }),
+            _apply_timeout(call_data, {
+                "id": "track",
+                "type": "rectangle",
+                "display": DISPLAY_FRONT,
+                "x": 2,
+                "y": 24,
+                "width": bar_width,
+                "height": 6,
+                "radius": 2,
+                "fill": "solid",
+                "fill_colors": [call_data["track_color"]],
+                "border_width": 0,
+            }),
+        ]
+    )
+    if fill_width > 0:
+        payload["elements"].append(
+            _apply_timeout(call_data, {
+                "id": "fill",
+                "type": "rectangle",
+                "display": DISPLAY_FRONT,
+                "x": 2,
+                "y": 24,
+                "width": fill_width,
+                "height": 6,
+                "radius": 2,
+                "fill": "solid",
+                "fill_colors": [call_data["accent_color"]],
+                "border_width": 0,
+            })
+        )
+    return payload
 
 
 def _validate_dashboard_payload(payload: Any) -> dict[str, Any]:
@@ -119,6 +653,112 @@ DRAW_DASHBOARD_SERVICE_SCHEMA = vol.Schema(
     }
 )
 
+ENTITY_DASHBOARD_ITEM_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("label"): cv.string,
+        vol.Optional("attribute"): cv.string,
+    }
+)
+
+DRAW_ENTITY_DASHBOARD_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_APPLICATION_NAME, default=DEFAULT_APPLICATION_NAME): cv.string,
+        vol.Required("title"): vol.All(cv.string, _validate_ascii_text),
+        vol.Required("entities"): vol.All(
+            [ENTITY_DASHBOARD_ITEM_SCHEMA], vol.Length(min=1, max=4)
+        ),
+        vol.Optional("display", default=DISPLAY_BACK): vol.In(DISPLAY_NAMES),
+        vol.Optional("color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("title_color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional(ATTR_LED_NOTIFICATION_COLOR): COLOR_HEX_PATTERN,
+        vol.Optional("priority", default=DEFAULT_DRAW_PRIORITY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)
+        ),
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+        vol.Optional("clear_before_draw", default=True): cv.boolean,
+    }
+)
+
+ENABLE_LIVE_ENTITY_DASHBOARD_SERVICE_SCHEMA = DRAW_ENTITY_DASHBOARD_SERVICE_SCHEMA
+
+BIND_BUTTON_ACTION_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required("button"): cv.string,
+        vol.Optional("action", default="PRESS"): cv.string,
+        vol.Required("service"): cv.string,
+        vol.Optional("service_data", default={}): dict,
+    }
+)
+
+CLEAR_BUTTON_ACTIONS_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional("button"): cv.string,
+        vol.Optional("action"): cv.string,
+    }
+)
+
+WEATHER_DASHBOARD_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_APPLICATION_NAME, default=DEFAULT_APPLICATION_NAME): cv.string,
+        vol.Required("weather_entity_id"): cv.entity_id,
+        vol.Optional("title", default="WEATHER"): vol.All(cv.string, _validate_ascii_text),
+        vol.Optional("display", default=DISPLAY_BACK): vol.In(DISPLAY_NAMES),
+        vol.Optional("color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("title_color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("accent_color", default="#00FFCCFF"): COLOR_HEX_PATTERN,
+        vol.Optional(ATTR_LED_NOTIFICATION_COLOR): COLOR_HEX_PATTERN,
+        vol.Optional("priority", default=DEFAULT_DRAW_PRIORITY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)
+        ),
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+        vol.Optional("clear_before_draw", default=True): cv.boolean,
+    }
+)
+
+ROOM_CLIMATE_DASHBOARD_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_APPLICATION_NAME, default=DEFAULT_APPLICATION_NAME): cv.string,
+        vol.Required("temperature_entity_id"): cv.entity_id,
+        vol.Optional("humidity_entity_id"): cv.entity_id,
+        vol.Optional("title", default="CLIMATE"): vol.All(cv.string, _validate_ascii_text),
+        vol.Optional("display", default=DISPLAY_BACK): vol.In(DISPLAY_NAMES),
+        vol.Optional("color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("title_color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("accent_color", default="#00FFCCFF"): COLOR_HEX_PATTERN,
+        vol.Optional(ATTR_LED_NOTIFICATION_COLOR): COLOR_HEX_PATTERN,
+        vol.Optional("priority", default=DEFAULT_DRAW_PRIORITY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)
+        ),
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+        vol.Optional("clear_before_draw", default=True): cv.boolean,
+    }
+)
+
+PROGRESS_CARD_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_APPLICATION_NAME, default=DEFAULT_APPLICATION_NAME): cv.string,
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("label"): cv.string,
+        vol.Optional("display", default=DISPLAY_FRONT): vol.In(DISPLAY_NAMES),
+        vol.Optional("title_color", default="#FFFFFFFF"): COLOR_HEX_PATTERN,
+        vol.Optional("accent_color", default="#00FF00FF"): COLOR_HEX_PATTERN,
+        vol.Optional("track_color", default="#333333FF"): COLOR_HEX_PATTERN,
+        vol.Optional(ATTR_LED_NOTIFICATION_COLOR): COLOR_HEX_PATTERN,
+        vol.Optional("priority", default=DEFAULT_DRAW_PRIORITY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)
+        ),
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+        vol.Optional("clear_before_draw", default=True): cv.boolean,
+    }
+)
+
 CLEAR_DISPLAY_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
@@ -138,8 +778,19 @@ SET_BRIGHTNESS_SERVICE_SCHEMA = vol.Schema(
 SET_VOLUME_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
-        vol.Required("volume"): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_VOLUME)),
+        vol.Required("volume"): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=0, max=MAX_VOLUME),
+            _validate_step_5,
+        ),
         vol.Optional("silent", default=True): cv.boolean,
+    }
+)
+
+SEND_INPUT_COMMAND_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required("key"): vol.In(INPUT_KEYS),
     }
 )
 
@@ -168,9 +819,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
 
+    async def async_render_live_entity_dashboard(call_data: dict[str, Any]) -> None:
+        payload = _build_entity_dashboard_payload(hass, call_data)
+        if call_data["clear_before_draw"]:
+            await client.async_clear(call_data[ATTR_APPLICATION_NAME])
+        await client.async_draw(payload)
+
+    button_actions = ButtonActionRegistry()
+
+    async def async_handle_button_action(button: str, action: str) -> None:
+        for binding in button_actions.matching(button, action):
+            try:
+                domain, service = binding["service"].split(".", 1)
+            except ValueError:
+                LOGGER.warning("Ignoring invalid Busy Bar button binding: %s", binding["service"])
+                continue
+            await hass.services.async_call(
+                domain,
+                service,
+                dict(binding["service_data"]),
+                blocking=False,
+            )
+
+    live_dashboard = LiveDashboardController(hass, async_render_live_entity_dashboard)
+    button_listener = ButtonEventListener(
+        hass,
+        client,
+        entry.entry_id,
+        entry.title,
+        async_handle_button_action,
+    )
+    button_listener.start()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = BusyBarRuntimeData(
         client=client,
         coordinator=coordinator,
+        live_dashboard=live_dashboard,
+        button_actions=button_actions,
+        button_listener=button_listener,
     )
 
     await _async_register_services(hass)
@@ -186,14 +872,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     domain_data = hass.data[DOMAIN]
-    domain_data.pop(entry.entry_id, None)
+    runtime_data = domain_data.pop(entry.entry_id, None)
+    if runtime_data is not None:
+        runtime_data.live_dashboard.disable()
+        await runtime_data.button_listener.stop()
 
     remaining_entries = [key for key in domain_data if key != DATA_SERVICES_REGISTERED]
     if not remaining_entries:
         for service_name in (
+            SERVICE_BIND_BUTTON_ACTION,
+            SERVICE_CLEAR_BUTTON_ACTIONS,
             SERVICE_DRAW_TEXT,
             SERVICE_DRAW_DASHBOARD,
+            SERVICE_DRAW_ENTITY_DASHBOARD,
+            SERVICE_DRAW_WEATHER_DASHBOARD,
+            SERVICE_DRAW_ROOM_CLIMATE_DASHBOARD,
+            SERVICE_DRAW_PROGRESS_CARD,
+            SERVICE_ENABLE_LIVE_ENTITY_DASHBOARD,
             SERVICE_CLEAR_DISPLAY,
+            SERVICE_DISABLE_LIVE_DASHBOARD,
+            SERVICE_SEND_INPUT_COMMAND,
             SERVICE_SET_BRIGHTNESS,
             SERVICE_SET_VOLUME,
         ):
@@ -269,6 +967,66 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         await runtime_data.client.async_draw(payload)
         await runtime_data.coordinator.async_request_refresh()
 
+    async def async_draw_entity_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        payload = _build_entity_dashboard_payload(hass, dict(call.data))
+
+        if call.data["clear_before_draw"]:
+            await runtime_data.client.async_clear(call.data[ATTR_APPLICATION_NAME])
+        await runtime_data.client.async_draw(payload)
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_draw_weather_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        payload = _build_weather_dashboard_payload(hass, dict(call.data))
+
+        if call.data["clear_before_draw"]:
+            await runtime_data.client.async_clear(call.data[ATTR_APPLICATION_NAME])
+        await runtime_data.client.async_draw(payload)
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_draw_room_climate_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        payload = _build_room_climate_dashboard_payload(hass, dict(call.data))
+
+        if call.data["clear_before_draw"]:
+            await runtime_data.client.async_clear(call.data[ATTR_APPLICATION_NAME])
+        await runtime_data.client.async_draw(payload)
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_draw_progress_card(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        payload = _build_progress_card_payload(hass, dict(call.data))
+
+        if call.data["clear_before_draw"]:
+            await runtime_data.client.async_clear(call.data[ATTR_APPLICATION_NAME])
+        await runtime_data.client.async_draw(payload)
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_enable_live_entity_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await runtime_data.live_dashboard.enable(dict(call.data))
+
+    async def async_disable_live_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        runtime_data.live_dashboard.disable()
+
+    async def async_bind_button_action(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        runtime_data.button_actions.bind(
+            call.data["button"],
+            call.data["action"],
+            call.data["service"],
+            call.data["service_data"],
+        )
+
+    async def async_clear_button_actions(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        runtime_data.button_actions.clear(
+            call.data.get("button"),
+            call.data.get("action"),
+        )
+
     async def async_clear_display(call: ServiceCall) -> None:
         runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
         await runtime_data.client.async_clear(call.data.get(ATTR_APPLICATION_NAME))
@@ -283,6 +1041,11 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
         await runtime_data.client.async_set_volume(call.data["volume"], call.data["silent"])
 
+    async def async_send_input_command(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await runtime_data.client.async_send_input_key(call.data["key"])
+        await runtime_data.coordinator.async_request_refresh()
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_DRAW_TEXT,
@@ -294,6 +1057,54 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_DRAW_DASHBOARD,
         async_draw_dashboard,
         schema=DRAW_DASHBOARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DRAW_ENTITY_DASHBOARD,
+        async_draw_entity_dashboard,
+        schema=DRAW_ENTITY_DASHBOARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ENABLE_LIVE_ENTITY_DASHBOARD,
+        async_enable_live_entity_dashboard,
+        schema=ENABLE_LIVE_ENTITY_DASHBOARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISABLE_LIVE_DASHBOARD,
+        async_disable_live_dashboard,
+        schema=vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DRAW_WEATHER_DASHBOARD,
+        async_draw_weather_dashboard,
+        schema=WEATHER_DASHBOARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DRAW_ROOM_CLIMATE_DASHBOARD,
+        async_draw_room_climate_dashboard,
+        schema=ROOM_CLIMATE_DASHBOARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DRAW_PROGRESS_CARD,
+        async_draw_progress_card,
+        schema=PROGRESS_CARD_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_BIND_BUTTON_ACTION,
+        async_bind_button_action,
+        schema=BIND_BUTTON_ACTION_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CLEAR_BUTTON_ACTIONS,
+        async_clear_button_actions,
+        schema=CLEAR_BUTTON_ACTIONS_SERVICE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
@@ -312,6 +1123,12 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_VOLUME,
         async_set_volume,
         schema=SET_VOLUME_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SEND_INPUT_COMMAND,
+        async_send_input_command,
+        schema=SEND_INPUT_COMMAND_SERVICE_SCHEMA,
     )
 
     domain_data[DATA_SERVICES_REGISTERED] = True
