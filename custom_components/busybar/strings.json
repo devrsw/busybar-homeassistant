@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect BUSY Bar",
+        "description": "Add a BUSY Bar using its HTTP API base URL.",
+        "data": {
+          "name": "Name",
+          "base_url": "Base URL",
+          "token": "Token or password",
+          "poll_interval": "Polling interval in seconds"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to BUSY Bar",
+      "invalid_auth": "Authentication failed",
+      "invalid_url": "Enter a valid BUSY Bar base URL"
+    },
+    "abort": {
+      "already_configured": "This BUSY Bar is already configured"
+    }
+  }
+}

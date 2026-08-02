@@ -1,0 +1,138 @@
+draw_text:
+  name: Draw text
+  description: Draw printable ASCII text on a BUSY Bar display.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      example: 1234567890abcdef1234567890abcdef
+      selector:
+        text:
+    application_name:
+      name: Application name
+      description: App namespace used by the BUSY Bar API.
+      example: home_assistant
+      default: home_assistant
+      selector:
+        text:
+    text:
+      name: Text
+      description: Printable ASCII text to draw.
+      example: Laundry done
+      required: true
+      selector:
+        text:
+    display:
+      name: Display
+      description: Which BUSY Bar display to use.
+      default: front
+      selector:
+        select:
+          options:
+            - front
+            - back
+    font:
+      name: Font
+      default: normal
+      selector:
+        select:
+          options:
+            - tiny
+            - small
+            - normal
+            - condensed
+            - bold
+            - large
+            - extra_large
+            - global
+    color:
+      name: Color
+      description: RGBA hex color in #RRGGBBAA format.
+      default: "#FFFFFFFF"
+      selector:
+        text:
+    led_notification_color:
+      name: LED notification color
+      description: Optional blinking LED color in #RRGGBBAA format.
+      selector:
+        text:
+    priority:
+      name: Priority
+      description: Draw priority from 1 to 100.
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    duration:
+      name: Duration
+      description: Time in seconds to display the message. Use 0 for no timeout.
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    clear_before_draw:
+      name: Clear before draw
+      description: Remove existing display elements for the same application first.
+      default: false
+      selector:
+        boolean:
+
+clear_display:
+  name: Clear display
+  description: Clear BUSY Bar display elements.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    application_name:
+      name: Application name
+      description: When set, clears only that application namespace.
+      selector:
+        text:
+
+set_brightness:
+  name: Set brightness
+  description: Set BUSY Bar display brightness.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    value:
+      name: Value
+      description: auto or a brightness value from 0 to 100.
+      required: true
+      example: auto
+      selector:
+        text:
+
+set_volume:
+  name: Set volume
+  description: Set BUSY Bar audio volume.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    volume:
+      name: Volume
+      description: Value from 0 to 100.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    silent:
+      name: Silent
+      description: Do not play the device volume-change sound.
+      default: true
+      selector:
+        boolean:

@@ -1,0 +1,6 @@
+{
+  "name": "BUSY Bar",
+  "content_in_root": false,
+  "homeassistant": "2024.8.0",
+  "render_readme": true
+}
