@@ -39,7 +39,7 @@ class BusyBarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return await self.client.async_get_status()
+            return await self.client.async_get_snapshot()
         except BusyBarAuthError as err:
             raise ConfigEntryAuthFailed from err
         except BusyBarApiError as err:

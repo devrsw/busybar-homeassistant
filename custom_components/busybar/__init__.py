@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -20,6 +20,7 @@ from .const import (
     ATTR_DURATION,
     ATTR_ENTRY_ID,
     ATTR_LED_NOTIFICATION_COLOR,
+    ATTR_PAYLOAD,
     CONF_BASE_URL,
     CONF_POLL_INTERVAL,
     DATA_SERVICES_REGISTERED,
@@ -33,6 +34,7 @@ from .const import (
     MAX_BRIGHTNESS,
     MAX_VOLUME,
     SERVICE_CLEAR_DISPLAY,
+    SERVICE_DRAW_DASHBOARD,
     SERVICE_DRAW_TEXT,
     SERVICE_SET_BRIGHTNESS,
     SERVICE_SET_VOLUME,
@@ -40,7 +42,7 @@ from .const import (
 from .coordinator import BusyBarDataUpdateCoordinator
 
 LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
+PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor"]
 COLOR_HEX_PATTERN = vol.Match(r"^#[A-Fa-f0-9]{8}$")
 
 
@@ -60,6 +62,34 @@ def _validate_ascii_text(value: str) -> str:
     return value
 
 
+def _validate_dashboard_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ServiceValidationError("Dashboard payload must be an object")
+
+    normalized = dict(payload)
+    normalized.setdefault(ATTR_APPLICATION_NAME, DEFAULT_APPLICATION_NAME)
+    normalized.setdefault("priority", DEFAULT_DRAW_PRIORITY)
+
+    elements = normalized.get("elements")
+    if not isinstance(elements, list) or not elements:
+        raise ServiceValidationError("Dashboard payload must include a non-empty elements list")
+
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict):
+            raise ServiceValidationError(
+                f"Dashboard element at index {index} must be an object"
+            )
+        if element.get("type") == "text":
+            text = element.get("text")
+            if not isinstance(text, str):
+                raise ServiceValidationError(
+                    f"Dashboard text element at index {index} must include text"
+                )
+            _validate_ascii_text(text)
+
+    return normalized
+
+
 DRAW_TEXT_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
@@ -77,6 +107,14 @@ DRAW_TEXT_SERVICE_SCHEMA = vol.Schema(
         vol.Optional("y", default=0): vol.Coerce(int),
         vol.Optional("width"): vol.All(vol.Coerce(int), vol.Range(min=1, max=160)),
         vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+        vol.Optional("clear_before_draw", default=False): cv.boolean,
+    }
+)
+
+DRAW_DASHBOARD_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_PAYLOAD): dict,
         vol.Optional("clear_before_draw", default=False): cv.boolean,
     }
 )
@@ -154,6 +192,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not remaining_entries:
         for service_name in (
             SERVICE_DRAW_TEXT,
+            SERVICE_DRAW_DASHBOARD,
             SERVICE_CLEAR_DISPLAY,
             SERVICE_SET_BRIGHTNESS,
             SERVICE_SET_VOLUME,
@@ -221,6 +260,15 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         await runtime_data.client.async_draw(payload)
         await runtime_data.coordinator.async_request_refresh()
 
+    async def async_draw_dashboard(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        payload = _validate_dashboard_payload(call.data[ATTR_PAYLOAD])
+
+        if call.data["clear_before_draw"]:
+            await runtime_data.client.async_clear(payload[ATTR_APPLICATION_NAME])
+        await runtime_data.client.async_draw(payload)
+        await runtime_data.coordinator.async_request_refresh()
+
     async def async_clear_display(call: ServiceCall) -> None:
         runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
         await runtime_data.client.async_clear(call.data.get(ATTR_APPLICATION_NAME))
@@ -240,6 +288,12 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_DRAW_TEXT,
         async_draw_text,
         schema=DRAW_TEXT_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DRAW_DASHBOARD,
+        async_draw_dashboard,
+        schema=DRAW_DASHBOARD_SERVICE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

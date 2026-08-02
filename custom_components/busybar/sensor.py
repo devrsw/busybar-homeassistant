@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, PERCENTAGE
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -19,6 +21,15 @@ from .coordinator import BusyBarDataUpdateCoordinator
 class BusyBarSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any]
     attributes_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+
+def _timestamp_from_epoch(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        return dt_util.utc_from_timestamp(int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
@@ -41,6 +52,33 @@ SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
         name="Power State",
         icon="mdi:battery-heart-variant",
         value_fn=lambda data: data.get("power", {}).get("state"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="battery_voltage",
+        name="Battery Voltage",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        native_unit_of_measurement="mV",
+        suggested_display_precision=0,
+        icon="mdi:lightning-bolt",
+        value_fn=lambda data: data.get("power", {}).get("battery_voltage"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="battery_current",
+        name="Battery Current",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        native_unit_of_measurement="mA",
+        suggested_display_precision=0,
+        icon="mdi:current-dc",
+        value_fn=lambda data: data.get("power", {}).get("battery_current"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="usb_voltage",
+        name="USB Voltage",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        native_unit_of_measurement="mV",
+        suggested_display_precision=0,
+        icon="mdi:usb-port",
+        value_fn=lambda data: data.get("power", {}).get("usb_voltage"),
     ),
     BusyBarSensorEntityDescription(
         key="firmware_version",
@@ -69,6 +107,76 @@ SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
             "boot_time": data.get("system", {}).get("boot_time"),
             "auto_update_enabled": data.get("system", {}).get("auto_update_enabled"),
         },
+    ),
+    BusyBarSensorEntityDescription(
+        key="uptime",
+        name="Uptime",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:timer-outline",
+        value_fn=lambda data: data.get("system", {}).get("uptime"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="display_brightness",
+        name="Display Brightness",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:brightness-6",
+        value_fn=lambda data: data.get("display", {}).get("brightness"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="serial_number",
+        name="Serial Number",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:identifier",
+        value_fn=lambda data: data.get("device", {}).get("serial_number"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="firmware_security",
+        name="Firmware Security",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:shield-check-outline",
+        value_fn=lambda data: data.get("device", {}).get("firmware_security"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="usb_mac",
+        name="USB MAC",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:usb-port",
+        value_fn=lambda data: data.get("device", {}).get("usb_mac"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="wifi_mac",
+        name="Wi-Fi MAC",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:wifi",
+        value_fn=lambda data: data.get("device", {}).get("wifi_mac"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="ble_mac",
+        name="BLE MAC",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:bluetooth",
+        value_fn=lambda data: data.get("device", {}).get("ble_mac"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="boot_time",
+        name="Boot Time",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data: _timestamp_from_epoch(data.get("system", {}).get("boot_time")),
+    ),
+    BusyBarSensorEntityDescription(
+        key="firmware_branch",
+        name="Firmware Branch",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:source-branch",
+        value_fn=lambda data: data.get("firmware", {}).get("branch"),
+    ),
+    BusyBarSensorEntityDescription(
+        key="firmware_target",
+        name="Firmware Target",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:target",
+        value_fn=lambda data: data.get("firmware", {}).get("target"),
     ),
 )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -113,6 +114,24 @@ class BusyBarApiClient:
     async def async_get_status(self) -> dict[str, Any]:
         return await self._request("GET", "/status")
 
+    async def async_get_display_brightness(self) -> dict[str, Any]:
+        return await self._request("GET", "/display/brightness")
+
+    async def async_get_audio_volume(self) -> dict[str, Any]:
+        return await self._request("GET", "/audio/volume")
+
+    async def async_get_snapshot(self) -> dict[str, Any]:
+        status, brightness, audio = await asyncio.gather(
+            self.async_get_status(),
+            self.async_get_display_brightness(),
+            self.async_get_audio_volume(),
+        )
+        return {
+            **status,
+            "display": {"brightness": brightness.get("value")},
+            "audio": {"volume": audio.get("volume")},
+        }
+
     async def async_draw(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         LOGGER.debug("Drawing on BUSY Bar: %s", payload)
         return await self._request("POST", "/display/draw", json_payload=payload)
@@ -133,3 +152,6 @@ class BusyBarApiClient:
         if silent:
             params["silent"] = 1
         return await self._request("POST", "/audio/volume", params=params)
+
+    async def async_stop_audio(self) -> dict[str, Any]:
+        return await self._request("DELETE", "/audio/play")

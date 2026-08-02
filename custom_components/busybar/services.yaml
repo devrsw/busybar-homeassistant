@@ -80,6 +80,64 @@ draw_text:
       selector:
         boolean:
 
+draw_dashboard:
+  name: Draw dashboard
+  description: Send a full BUSY Bar display payload so Home Assistant can render a custom dashboard.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    payload:
+      name: Payload
+      description: Full BUSY Bar DisplayElements object, including application_name and elements.
+      required: true
+      example:
+        application_name: home_assistant
+        priority: 80
+        led_notification_color: "#00FF00FF"
+        elements:
+          - id: title
+            type: text
+            text: Laundry
+            font: bold
+            color: "#FFFFFFFF"
+            display: front
+            align: top_mid
+            x: 0
+            y: 2
+          - id: progress_bg
+            type: rectangle
+            display: front
+            x: 4
+            y: 24
+            width: 64
+            height: 8
+            radius: 2
+            fill: solid
+            fill_colors:
+              - "#333333FF"
+          - id: progress_fg
+            type: rectangle
+            display: front
+            x: 4
+            y: 24
+            width: 40
+            height: 8
+            radius: 2
+            fill: solid
+            fill_colors:
+              - "#00FF00FF"
+      selector:
+        object:
+    clear_before_draw:
+      name: Clear before draw
+      description: Remove existing display elements for the payload application first.
+      default: false
+      selector:
+        boolean:
+
 clear_display:
   name: Clear display
   description: Clear BUSY Bar display elements.
