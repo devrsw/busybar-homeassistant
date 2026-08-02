@@ -42,7 +42,7 @@ from .const import (
 from .coordinator import BusyBarDataUpdateCoordinator
 
 LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor"]
+PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor", "text"]
 COLOR_HEX_PATTERN = vol.Match(r"^#[A-Fa-f0-9]{8}$")
 
 

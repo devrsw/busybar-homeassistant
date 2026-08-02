@@ -120,16 +120,24 @@ class BusyBarApiClient:
     async def async_get_audio_volume(self) -> dict[str, Any]:
         return await self._request("GET", "/audio/volume")
 
+    async def async_get_name(self) -> dict[str, Any]:
+        return await self._request("GET", "/name")
+
+    async def async_set_name(self, name: str) -> dict[str, Any]:
+        return await self._request("POST", "/name", json_payload={"name": name})
+
     async def async_get_snapshot(self) -> dict[str, Any]:
-        status, brightness, audio = await asyncio.gather(
+        status, brightness, audio, name = await asyncio.gather(
             self.async_get_status(),
             self.async_get_display_brightness(),
             self.async_get_audio_volume(),
+            self.async_get_name(),
         )
         return {
             **status,
             "display": {"brightness": brightness.get("value")},
             "audio": {"volume": audio.get("volume")},
+            "name": {"name": name.get("name")},
         }
 
     async def async_draw(self, payload: Mapping[str, Any]) -> dict[str, Any]:

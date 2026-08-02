@@ -10,7 +10,7 @@ Local-first integration for Home Assistant. USB and LAN control work without any
 
 - Config-entry-based custom integration under `custom_components/busybar`
 - Polling sensors for device status, firmware info, API version, and battery charge
-- Additional Home Assistant entities for BUSY Bar battery, power, firmware, security, brightness, auto-update status, audio volume, and device controls
+- Additional Home Assistant entities for BUSY Bar battery, power, firmware, security, auto-update status, audio volume, device naming, and device controls
 - Services for drawing text, clearing the display, setting display brightness, and setting audio volume
 - A generic dashboard service that lets Home Assistant send a full BUSY Bar display layout
 - Support for BUSY Bar over USB, LAN, or the BUSY cloud endpoint
@@ -143,11 +143,12 @@ The integration now exposes a wider set of Home Assistant entities backed by the
 - Battery charge, voltage, current, and power state
 - USB voltage
 - Firmware version, branch, target, and firmware security state
-- API version, uptime, and boot time
-- Serial number and USB/Wi-Fi/BLE MAC addresses
+- API version and last boot time
+- Serial number
 - Display brightness as a writable number plus a brightness-mode select
 - Auto-update enabled
 - Audio volume as a writable number entity
+- Device name as a writable text entity
 - Buttons to clear the Home Assistant display namespace and stop audio playback
 
 ## Notes
