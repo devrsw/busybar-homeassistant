@@ -134,6 +134,31 @@ data:
 					- "#00FF00FF"
 ```
 
+To draw a standalone rectangle, include a `rectangle` element in the payload. Set
+`x` and `y` for its position, `width` and `height` for its size, and `fill_colors`
+for its RGBA fill color:
+
+```yaml
+service: busybar.draw_dashboard
+data:
+	clear_before_draw: true
+	payload:
+		application_name: home_assistant
+		priority: 80
+		elements:
+			- id: rectangle
+				type: rectangle
+				display: front
+				x: 4
+				y: 8
+				width: 56
+				height: 20
+				radius: 2
+				fill: solid
+				fill_colors:
+					- "#00FF00FF"
+```
+
 ### `busybar.draw_entity_dashboard`
 
 Build a simple dashboard directly from Home Assistant entity values. The integration reads the entities, formats label/value rows, and generates the BUSY Bar payload for you.
