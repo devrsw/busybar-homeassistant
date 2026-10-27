@@ -115,7 +115,11 @@ class ButtonEventListener:
 
     def start(self) -> None:
         if self._task is None:
-            self._task = self._hass.async_create_task(self._run())
+            # A background task so the never-ending listener doesn't hold up startup.
+            self._task = self._hass.async_create_background_task(
+                self._run(),
+                f"busybar button listener {self._entry_id}",
+            )
 
     async def stop(self) -> None:
         if self._task is None:

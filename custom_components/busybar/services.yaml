@@ -45,6 +45,7 @@ draw_text:
             - large
             - extra_large
             - global
+            - superscript
     color:
       name: Color
       description: RGBA hex color in #RRGGBBAA format.
@@ -676,3 +677,134 @@ set_volume:
       default: true
       selector:
         boolean:
+
+launch_app:
+  name: Launch app
+  description: Launch an installed JavaScript app on the BUSY Bar. Requires firmware 1.3.1+ over USB or LAN.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    app_id:
+      name: App ID
+      description: JavaScript app ID. The Installed Apps sensor lists the IDs on the device.
+      required: true
+      example: com.example.weather
+      selector:
+        text:
+
+quit_app:
+  name: Quit app
+  description: Quit the JavaScript app that is running on the BUSY Bar.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+
+install_app:
+  name: Install app
+  description: Upload and install a JavaScript app package (.tgz or .tar) from a path Home Assistant can read.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    path:
+      name: Path
+      description: Package path, absolute or relative to the Home Assistant config directory. Absolute paths must be in allowlist_external_dirs.
+      required: true
+      example: busybar/my_app.tgz
+      selector:
+        text:
+    launch:
+      name: Launch after install
+      default: false
+      selector:
+        boolean:
+
+delete_app:
+  name: Delete app
+  description: Uninstall a JavaScript app from the BUSY Bar. Its settings are kept on the device.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    app_id:
+      name: App ID
+      description: JavaScript app ID. The Installed Apps sensor lists the IDs on the device.
+      required: true
+      example: com.example.weather
+      selector:
+        text:
+
+get_app_settings:
+  name: Get app settings
+  description: Return the settings document (version and values) for a JavaScript app.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    app_id:
+      name: App ID
+      description: JavaScript app ID. The Installed Apps sensor lists the IDs on the device.
+      required: true
+      example: com.example.weather
+      selector:
+        text:
+
+set_app_settings:
+  name: Set app settings
+  description: Change settings for a JavaScript app. Values are merged into the current settings by default.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    app_id:
+      name: App ID
+      description: JavaScript app ID. The Installed Apps sensor lists the IDs on the device.
+      required: true
+      example: com.example.weather
+      selector:
+        text:
+    values:
+      name: Values
+      description: Setting values keyed by field ID. Groups are nested objects.
+      required: true
+      example:
+        volume: 5
+      selector:
+        object:
+    merge:
+      name: Merge
+      description: Merge into the current values. Turn off to replace the whole document, in which case every field must be given.
+      default: true
+      selector:
+        boolean:
+
+reset_app_settings:
+  name: Reset app settings
+  description: Reset every setting of a JavaScript app to its default.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Required only when more than one BUSY Bar is configured.
+      selector:
+        text:
+    app_id:
+      name: App ID
+      description: JavaScript app ID. The Installed Apps sensor lists the IDs on the device.
+      required: true
+      example: com.example.weather
+      selector:
+        text:

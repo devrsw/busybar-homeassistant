@@ -7,10 +7,12 @@ from homeassistant.components.button import ButtonEntity, ButtonEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .client import BusyBarApiError
 from .const import DEFAULT_APPLICATION_NAME, DOMAIN
 from .coordinator import BusyBarDataUpdateCoordinator
 
@@ -18,6 +20,7 @@ from .coordinator import BusyBarDataUpdateCoordinator
 @dataclass(frozen=True, kw_only=True)
 class BusyBarButtonDescription(ButtonEntityDescription):
     press_fn: Callable[[BusyBarDataUpdateCoordinator], Awaitable[None]]
+    requires_apps_api: bool = False
 
 
 async def _async_clear_display(coordinator: BusyBarDataUpdateCoordinator) -> None:
@@ -27,6 +30,14 @@ async def _async_clear_display(coordinator: BusyBarDataUpdateCoordinator) -> Non
 
 async def _async_stop_audio(coordinator: BusyBarDataUpdateCoordinator) -> None:
     await coordinator.client.async_stop_audio()
+    await coordinator.async_request_refresh()
+
+
+async def _async_quit_app(coordinator: BusyBarDataUpdateCoordinator) -> None:
+    try:
+        await coordinator.client.async_quit_app()
+    except BusyBarApiError as err:
+        raise HomeAssistantError(str(err)) from err
     await coordinator.async_request_refresh()
 
 
@@ -52,6 +63,13 @@ BUTTONS: tuple[BusyBarButtonDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         icon="mdi:stop-circle-outline",
         press_fn=_async_stop_audio,
+    ),
+    BusyBarButtonDescription(
+        key="quit_app",
+        name="Quit App",
+        icon="mdi:application-export",
+        requires_apps_api=True,
+        press_fn=_async_quit_app,
     ),
     BusyBarButtonDescription(
         key="input_up",
@@ -133,7 +151,12 @@ async def async_setup_entry(
 ) -> None:
     runtime_data = hass.data[DOMAIN][entry.entry_id]
     coordinator: BusyBarDataUpdateCoordinator = runtime_data.coordinator
-    async_add_entities(BusyBarButton(entry, coordinator, description) for description in BUTTONS)
+    has_apps_api = coordinator.data.get("apps") is not None
+    async_add_entities(
+        BusyBarButton(entry, coordinator, description)
+        for description in BUTTONS
+        if has_apps_api or not description.requires_apps_api
+    )
 
 
 class BusyBarButton(CoordinatorEntity[BusyBarDataUpdateCoordinator], ButtonEntity):

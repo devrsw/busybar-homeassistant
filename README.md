@@ -19,6 +19,7 @@ Local-first integration for Home Assistant. USB and LAN control work without any
 - BUSY Bar button events exposed into Home Assistant, with optional runtime service bindings
 - BUSY timer entities for mode, pause state, time left, current interval, and editable theme
 - BUSY input command controls through buttons and a dedicated service
+- JavaScript app management (firmware 1.3.1+): list, launch, quit, install, and uninstall apps, and read or change their settings
 - Support for BUSY Bar over USB, LAN, or the BUSY cloud endpoint
 
 ## Installation
@@ -309,6 +310,25 @@ data:
 	key: start
 ```
 
+### JavaScript apps
+
+Firmware 1.3.1 made JavaScript apps the official way to build BUSY Bar apps. The apps API only works over USB or LAN, not through the BUSY cloud endpoint. Use the Installed Apps sensor's `apps` attribute to find app IDs.
+
+- `busybar.launch_app` / `busybar.quit_app`: start an installed app or quit the running one
+- `busybar.install_app`: upload a `.tgz` or `.tar` package from a path Home Assistant can read (relative paths resolve against the config directory) and optionally launch it; returns the installed app info
+- `busybar.delete_app`: uninstall an app (the device keeps its settings)
+- `busybar.get_app_settings`: returns the app's settings document as a service response
+- `busybar.set_app_settings`: merges `values` into the current settings (set `merge: false` to replace the whole document)
+- `busybar.reset_app_settings`: reset every setting to its default
+
+```yaml
+service: busybar.set_app_settings
+data:
+	app_id: com.example.weather
+	values:
+		units: metric
+```
+
 ## Exposed entities
 
 The integration now exposes a wider set of Home Assistant entities backed by the BUSY Bar HTTP API, including:
@@ -327,6 +347,7 @@ The integration now exposes a wider set of Home Assistant entities backed by the
 - Busy time-left duration sensor and paused-state binary sensor
 - Buttons to clear the Home Assistant display namespace and stop audio playback
 - Buttons for common BUSY input commands (Start, Busy, Custom, OK, Back)
+- Installed Apps sensor (count, with app IDs, names, and versions as attributes), a Launch App select, and a Quit App button, when the apps API is available
 
 ## Notes
 
@@ -336,6 +357,8 @@ The integration now exposes a wider set of Home Assistant entities backed by the
 - The specialized helpers are thin layout builders on top of the BUSY Bar draw API. They are meant to cover common automation use cases with less templating.
 - Runtime button bindings are not persisted across Home Assistant restarts. Use the `busybar_button` event in automations if you need persistent behavior.
 - BUSY Bar text rendering accepts printable ASCII only.
+- The `superscript` font (firmware 1.3.1+) is available in `busybar.draw_text` and dashboard payloads.
+- The BUSY Bar API does not report which app is running, so the Launch App select shows the app most recently launched from Home Assistant.
 - If you configure more than one BUSY Bar, include `entry_id` in service calls to target a specific device.
 
 ## Suggested GitHub metadata

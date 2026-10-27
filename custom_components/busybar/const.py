@@ -34,6 +34,15 @@ SERVICE_SEND_INPUT_COMMAND = "send_input_command"
 SERVICE_SET_BRIGHTNESS = "set_brightness"
 SERVICE_SET_VOLUME = "set_volume"
 SERVICE_DISABLE_LIVE_DASHBOARD = "disable_live_dashboard"
+SERVICE_LAUNCH_APP = "launch_app"
+SERVICE_QUIT_APP = "quit_app"
+SERVICE_DELETE_APP = "delete_app"
+SERVICE_INSTALL_APP = "install_app"
+SERVICE_GET_APP_SETTINGS = "get_app_settings"
+SERVICE_SET_APP_SETTINGS = "set_app_settings"
+SERVICE_RESET_APP_SETTINGS = "reset_app_settings"
+
+ATTR_APP_ID = "app_id"
 
 INPUT_KEYS = (
     "up",
@@ -59,6 +68,7 @@ DISPLAY_FONT_BOLD = "bold"
 DISPLAY_FONT_LARGE = "large"
 DISPLAY_FONT_EXTRA_LARGE = "extra_large"
 DISPLAY_FONT_GLOBAL = "global"
+DISPLAY_FONT_SUPERSCRIPT = "superscript"
 
 DISPLAY_FONTS = (
     DISPLAY_FONT_TINY,
@@ -69,6 +79,7 @@ DISPLAY_FONTS = (
     DISPLAY_FONT_LARGE,
     DISPLAY_FONT_EXTRA_LARGE,
     DISPLAY_FONT_GLOBAL,
+    DISPLAY_FONT_SUPERSCRIPT,
 )
 
 DISPLAY_ALIGNMENTS = (
@@ -87,5 +98,7 @@ DISPLAY_NAMES = (DISPLAY_FRONT, DISPLAY_BACK)
 
 MAX_BRIGHTNESS = 100
 MAX_VOLUME = 100
+
+APP_ID_PATTERN = r"^[a-zA-Z0-9_\-][a-zA-Z0-9_\-.]{0,31}$"
 
 DATA_SERVICES_REGISTERED = "services_registered"

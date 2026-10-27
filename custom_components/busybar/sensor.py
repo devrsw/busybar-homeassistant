@@ -21,6 +21,7 @@ from .coordinator import BusyBarDataUpdateCoordinator
 class BusyBarSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any]
     attributes_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    requires_apps_api: bool = False
 
 
 def _timestamp_from_epoch(value: Any) -> datetime | None:
@@ -48,6 +49,13 @@ def _busy_time_left_seconds(data: dict[str, Any]) -> int | None:
     if not isinstance(value, (int, float)):
         return None
     return max(0, int(round(value / 1000)))
+
+
+def _installed_apps(data: dict[str, Any]) -> list[dict[str, Any]]:
+    apps = data.get("apps")
+    if not isinstance(apps, list):
+        return []
+    return [app for app in apps if isinstance(app, dict) and not app.get("is_debug")]
 
 
 SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
@@ -181,6 +189,24 @@ SENSORS: tuple[BusyBarSensorEntityDescription, ...] = (
         icon="mdi:counter",
         value_fn=lambda data: _busy_snapshot(data).get("current_interval"),
     ),
+    BusyBarSensorEntityDescription(
+        key="installed_apps",
+        name="Installed Apps",
+        icon="mdi:apps",
+        requires_apps_api=True,
+        value_fn=lambda data: len(_installed_apps(data)),
+        attributes_fn=lambda data: {
+            "apps": [
+                {
+                    "id": app.get("id"),
+                    "name": app.get("name"),
+                    "version": app.get("version"),
+                    "author": app.get("author"),
+                }
+                for app in _installed_apps(data)
+            ]
+        },
+    ),
 )
 
 
@@ -191,7 +217,12 @@ async def async_setup_entry(
 ) -> None:
     runtime_data = hass.data[DOMAIN][entry.entry_id]
     coordinator: BusyBarDataUpdateCoordinator = runtime_data.coordinator
-    async_add_entities(BusyBarSensor(entry, coordinator, description) for description in SENSORS)
+    has_apps_api = coordinator.data.get("apps") is not None
+    async_add_entities(
+        BusyBarSensor(entry, coordinator, description)
+        for description in SENSORS
+        if has_apps_api or not description.requires_apps_api
+    )
 
 
 class BusyBarSensor(CoordinatorEntity[BusyBarDataUpdateCoordinator], SensorEntity):

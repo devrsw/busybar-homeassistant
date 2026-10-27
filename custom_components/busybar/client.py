@@ -88,15 +88,20 @@ class BusyBarApiClient:
         *,
         params: Mapping[str, Any] | None = None,
         json_payload: Mapping[str, Any] | None = None,
+        data: bytes | None = None,
     ) -> dict[str, Any]:
         url = self._build_url(path)
+        headers = self._headers()
+        if data is not None:
+            headers["Content-Type"] = "application/octet-stream"
         try:
             async with self._session.request(
                 method,
                 url,
-                headers=self._headers(),
+                headers=headers,
                 params=params,
                 json=json_payload,
+                data=data,
             ) as response:
                 if response.status in (401, 403):
                     raise BusyBarAuthError("Authentication failed")
@@ -154,6 +159,48 @@ class BusyBarApiClient:
     async def async_send_input_key(self, key: str) -> dict[str, Any]:
         return await self._request("POST", "/input", params={"key": key})
 
+    async def async_list_apps(self) -> list[dict[str, Any]]:
+        result = await self._request("GET", "/apps/list")
+        apps = result.get("apps")
+        return apps if isinstance(apps, list) else []
+
+    async def async_launch_app(self, app_id: str) -> dict[str, Any]:
+        return await self._request("POST", "/apps/launch", params={"app_id": app_id})
+
+    async def async_quit_app(self) -> dict[str, Any]:
+        return await self._request("POST", "/apps/quit")
+
+    async def async_delete_app(self, app_id: str) -> dict[str, Any]:
+        return await self._request("DELETE", "/apps", params={"app_id": app_id})
+
+    async def async_stage_app(self, package: bytes) -> dict[str, Any]:
+        return await self._request("POST", "/apps/stage", data=package)
+
+    async def async_install_app(self, install_key: int) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/apps/install",
+            params={"install_key": install_key},
+        )
+
+    async def async_get_app_settings(self, app_id: str) -> dict[str, Any]:
+        return await self._request("GET", "/apps/settings", params={"app_id": app_id})
+
+    async def async_set_app_settings(
+        self,
+        app_id: str,
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PUT",
+            "/apps/settings",
+            params={"app_id": app_id},
+            json_payload=document,
+        )
+
+    async def async_reset_app_settings(self, app_id: str) -> dict[str, Any]:
+        return await self._request("DELETE", "/apps/settings", params={"app_id": app_id})
+
     async def async_get_snapshot(self) -> dict[str, Any]:
         status, brightness, audio, name = await asyncio.gather(
             self.async_get_status(),
@@ -167,12 +214,21 @@ class BusyBarApiClient:
         except BusyBarApiError:
             busy = {}
 
+        # The apps API needs firmware 1.3.1+ and is not available over the cloud endpoint.
+        try:
+            apps: list[dict[str, Any]] | None = await self.async_list_apps()
+        except BusyBarAuthError:
+            raise
+        except BusyBarApiError:
+            apps = None
+
         return {
             **status,
             "display": {"brightness": brightness.get("value")},
             "audio": {"volume": audio.get("volume")},
             "name": {"name": name.get("name")},
             "busy": busy if isinstance(busy, dict) else {},
+            "apps": apps,
         }
 
     async def async_draw(self, payload: Mapping[str, Any]) -> dict[str, Any]:

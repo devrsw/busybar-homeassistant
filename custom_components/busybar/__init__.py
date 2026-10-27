@@ -1,23 +1,27 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
+from pathlib import Path
 import re
-from typing import Any
+from typing import Any, TypeVar
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_TOKEN
 from homeassistant.helpers.typing import StateType
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .client import BusyBarApiClient
+from .client import BusyBarApiClient, BusyBarApiError
 from .const import (
+    APP_ID_PATTERN,
+    ATTR_APP_ID,
     ATTR_APPLICATION_NAME,
     ATTR_DURATION,
     ATTR_ENTRY_ID,
@@ -41,6 +45,7 @@ from .const import (
     SERVICE_BIND_BUTTON_ACTION,
     SERVICE_CLEAR_BUTTON_ACTIONS,
     SERVICE_CLEAR_DISPLAY,
+    SERVICE_DELETE_APP,
     SERVICE_DISABLE_LIVE_DASHBOARD,
     SERVICE_DRAW_DASHBOARD,
     SERVICE_DRAW_ENTITY_DASHBOARD,
@@ -49,7 +54,13 @@ from .const import (
     SERVICE_DRAW_TEXT,
     SERVICE_DRAW_ROOM_CLIMATE_DASHBOARD,
     SERVICE_DRAW_WEATHER_DASHBOARD,
+    SERVICE_GET_APP_SETTINGS,
+    SERVICE_INSTALL_APP,
+    SERVICE_LAUNCH_APP,
+    SERVICE_QUIT_APP,
+    SERVICE_RESET_APP_SETTINGS,
     SERVICE_SEND_INPUT_COMMAND,
+    SERVICE_SET_APP_SETTINGS,
     SERVICE_SET_BRIGHTNESS,
     SERVICE_SET_VOLUME,
 )
@@ -59,6 +70,8 @@ from .runtime import ButtonActionRegistry, ButtonEventListener, LiveDashboardCon
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor", "text"]
 COLOR_HEX_PATTERN = vol.Match(r"^#[A-Fa-f0-9]{8}$")
+APP_ID = vol.All(cv.string, vol.Match(APP_ID_PATTERN))
+MAX_APP_PACKAGE_BYTES = 16 * 1024 * 1024
 WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
@@ -794,6 +807,68 @@ SEND_INPUT_COMMAND_SERVICE_SCHEMA = vol.Schema(
     }
 )
 
+APP_ID_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_APP_ID): APP_ID,
+    }
+)
+
+QUIT_APP_SERVICE_SCHEMA = vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string})
+
+INSTALL_APP_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required("path"): cv.string,
+        vol.Optional("launch", default=False): cv.boolean,
+    }
+)
+
+SET_APP_SETTINGS_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_APP_ID): APP_ID,
+        vol.Required("values"): dict,
+        vol.Optional("merge", default=True): cv.boolean,
+    }
+)
+
+_T = TypeVar("_T")
+
+
+async def _async_call_api(awaitable: Awaitable[_T]) -> _T:
+    """Surface BUSY Bar API errors to the service caller."""
+
+    try:
+        return await awaitable
+    except BusyBarApiError as err:
+        raise HomeAssistantError(str(err)) from err
+
+
+def _merge_settings(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_settings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _read_app_package(hass: HomeAssistant, raw_path: str) -> bytes:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = Path(hass.config.path(raw_path))
+    if not hass.config.is_allowed_path(str(path)):
+        raise ServiceValidationError(
+            f"{path} is not in an allowed directory; add it to allowlist_external_dirs"
+        )
+    if not path.is_file():
+        raise ServiceValidationError(f"App package not found: {path}")
+    if path.stat().st_size > MAX_APP_PACKAGE_BYTES:
+        raise ServiceValidationError(f"App package is too large: {path}")
+    return path.read_bytes()
+
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the BUSY Bar integration."""
@@ -894,6 +969,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_SEND_INPUT_COMMAND,
             SERVICE_SET_BRIGHTNESS,
             SERVICE_SET_VOLUME,
+            SERVICE_LAUNCH_APP,
+            SERVICE_QUIT_APP,
+            SERVICE_DELETE_APP,
+            SERVICE_INSTALL_APP,
+            SERVICE_GET_APP_SETTINGS,
+            SERVICE_SET_APP_SETTINGS,
+            SERVICE_RESET_APP_SETTINGS,
         ):
             hass.services.async_remove(DOMAIN, service_name)
         domain_data.pop(DATA_SERVICES_REGISTERED, None)
@@ -1046,6 +1128,62 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         await runtime_data.client.async_send_input_key(call.data["key"])
         await runtime_data.coordinator.async_request_refresh()
 
+    async def async_launch_app(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await _async_call_api(runtime_data.client.async_launch_app(call.data[ATTR_APP_ID]))
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_quit_app(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await _async_call_api(runtime_data.client.async_quit_app())
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_delete_app(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await _async_call_api(runtime_data.client.async_delete_app(call.data[ATTR_APP_ID]))
+        await runtime_data.coordinator.async_request_refresh()
+
+    async def async_install_app(call: ServiceCall) -> ServiceResponse:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        package = await hass.async_add_executor_job(_read_app_package, hass, call.data["path"])
+        staged = await _async_call_api(runtime_data.client.async_stage_app(package))
+        install_key = staged.get("install_key")
+        if not isinstance(install_key, int):
+            raise HomeAssistantError("BUSY Bar did not return an install key for the app package")
+        await _async_call_api(runtime_data.client.async_install_app(install_key))
+
+        app = staged.get("staged") or {}
+        if call.data["launch"] and app.get("id"):
+            await _async_call_api(runtime_data.client.async_launch_app(app["id"]))
+        await runtime_data.coordinator.async_request_refresh()
+        return {"app": app, "replaced": staged.get("installed")}
+
+    async def async_get_app_settings(call: ServiceCall) -> ServiceResponse:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        return await _async_call_api(
+            runtime_data.client.async_get_app_settings(call.data[ATTR_APP_ID])
+        )
+
+    async def async_set_app_settings(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        app_id = call.data[ATTR_APP_ID]
+        # The device replaces the whole document and requires a matching version,
+        # so always start from the current document.
+        current = await _async_call_api(runtime_data.client.async_get_app_settings(app_id))
+        values = call.data["values"]
+        if call.data["merge"]:
+            values = _merge_settings(current.get("values") or {}, values)
+        await _async_call_api(
+            runtime_data.client.async_set_app_settings(
+                app_id,
+                {"version": current.get("version"), "values": values},
+            )
+        )
+
+    async def async_reset_app_settings(call: ServiceCall) -> None:
+        runtime_data = _get_runtime_data(hass, call.data.get(ATTR_ENTRY_ID))
+        await _async_call_api(runtime_data.client.async_reset_app_settings(call.data[ATTR_APP_ID]))
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_DRAW_TEXT,
@@ -1129,6 +1267,50 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SEND_INPUT_COMMAND,
         async_send_input_command,
         schema=SEND_INPUT_COMMAND_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LAUNCH_APP,
+        async_launch_app,
+        schema=APP_ID_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_QUIT_APP,
+        async_quit_app,
+        schema=QUIT_APP_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_APP,
+        async_delete_app,
+        schema=APP_ID_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_INSTALL_APP,
+        async_install_app,
+        schema=INSTALL_APP_SERVICE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_APP_SETTINGS,
+        async_get_app_settings,
+        schema=APP_ID_SERVICE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_APP_SETTINGS,
+        async_set_app_settings,
+        schema=SET_APP_SETTINGS_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_APP_SETTINGS,
+        async_reset_app_settings,
+        schema=APP_ID_SERVICE_SCHEMA,
     )
 
     domain_data[DATA_SERVICES_REGISTERED] = True
